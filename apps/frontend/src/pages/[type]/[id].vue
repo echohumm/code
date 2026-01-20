@@ -1063,11 +1063,15 @@ const currentGameVersion = computed(() => {
 })
 
 const possibleGameVersions = computed(() => {
-	return versionsV3.value?.available_game_versions || []
+	return versions.value
+		.filter((x) => !currentPlatform.value || x.loaders.includes(currentPlatform.value))
+		.flatMap((x) => x.game_versions)
 })
 
 const possiblePlatforms = computed(() => {
-	return versionsV3.value?.available_loaders || []
+	return versions.value
+		.filter((x) => !currentGameVersion.value || x.game_versions.includes(currentGameVersion.value))
+		.flatMap((x) => x.loaders)
 })
 
 const currentPlatform = computed(() => {
@@ -1414,11 +1418,29 @@ const filteredVersions = computed(() => {
 	)
 })
 
-const filteredRelease = computed(() => versionsV3.value?.latest_versions?.release || null)
+const filteredRelease = computed(() => {
+	return filteredVersions.value.find((x) => x.version_type === 'release')
+})
 
-const filteredBeta = computed(() => versionsV3.value?.latest_versions?.beta || null)
+const filteredBeta = computed(() => {
+	return filteredVersions.value.find(
+		(x) =>
+			x.version_type === 'beta' &&
+			(!filteredRelease.value ||
+				dayjs(x.date_published).isAfter(dayjs(filteredRelease.value.date_published))),
+	)
+})
 
-const filteredAlpha = computed(() => versionsV3.value?.latest_versions?.alpha || null)
+const filteredAlpha = computed(() => {
+	return filteredVersions.value.find(
+		(x) =>
+			x.version_type === 'alpha' &&
+			(!filteredRelease.value ||
+				dayjs(x.date_published).isAfter(dayjs(filteredRelease.value.date_published))) &&
+			(!filteredBeta.value ||
+				dayjs(x.date_published).isAfter(dayjs(filteredBeta.value.date_published))),
+	)
+})
 
 const displayCollectionsSearch = ref('')
 const collections = computed(() =>
@@ -1454,12 +1476,14 @@ let project,
 	dependencies,
 	versions,
 	versionsV3,
+	resetVersionsV2,
 	organization,
 	resetOrganization,
 	projectV2Error,
 	projectV3Error,
 	membersError,
 	dependenciesError,
+	versionsError,
 	versionsV3Error,
 	resetVersionsV3
 try {
@@ -1468,6 +1492,7 @@ try {
 		{ data: projectV3, error: projectV3Error, refresh: resetProjectV3 },
 		{ data: allMembers, error: membersError, refresh: resetMembers },
 		{ data: dependencies, error: dependenciesError },
+		{ data: versions, error: versionsError, refresh: resetVersionsV2 },
 		{ data: versionsV3, error: versionsV3Error, refresh: resetVersionsV3 },
 		{ data: organization, refresh: resetOrganization },
 	] = await Promise.all([
@@ -1570,9 +1595,13 @@ async function resetProject() {
 }
 
 async function resetVersions() {
+	await resetVersionsV2()
 	await resetVersionsV3()
 
-	versions.value = versionsV3.value?.versions || []
+	versions.value = (versions.value ?? []).map((v) => ({
+		...v,
+		environment: versionsV3.value?.find((v3) => v3.id === v.id)?.environment,
+	}))
 }
 
 function handleError(err, project = false) {
@@ -1592,6 +1621,7 @@ handleError(projectV2Error, true)
 handleError(projectV3Error)
 handleError(membersError)
 handleError(dependenciesError)
+handleError(versionsError)
 handleError(versionsV3Error)
 
 if (!project.value) {
